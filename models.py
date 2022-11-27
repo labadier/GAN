@@ -3,6 +3,9 @@
 from typing import Any
 from functools import partial
 from tqdm import tqdm
+import numpy as np
+from matplotlib import pyplot as plt
+from pathlib import Path
 
 from params import parameters
 from utils import load_dataset
@@ -23,7 +26,7 @@ class Generator(nn.Module):
   dtype: type = jnp.float32
 
   @nn.compact
-  def __call__(self, z: jnp.ndarray, train: bool = True):
+  def __call__(self, z: jnp.ndarray, batch_size = parameters.batch_size, train: bool = True):
 
     conv_transpose = partial(nn.ConvTranspose, padding='VALID',
                              kernel_init=normal_init(0.02), dtype=self.dtype)
@@ -31,7 +34,7 @@ class Generator(nn.Module):
     batch_norm = partial(nn.BatchNorm, use_running_average = not train, axis=-1, 
                          scale_init=normal_init(0.02), dtype=self.dtype)
 
-    z = z.reshape((parameters.batch_size, 1, 1, parameters.noise_dims))
+    z = z.reshape((batch_size, 1, 1, parameters.noise_dims))
 
     x = conv_transpose(self.features*4, kernel_size=[3, 3], strides=[2, 2])(z)
 
@@ -45,6 +48,7 @@ class Generator(nn.Module):
     x = nn.relu(x)
     x = conv_transpose(1, [4, 4], [2, 2])(x)
     x = jnp.tanh(x)
+    # print('Generator Compiled')
     return x
 
 
@@ -53,7 +57,7 @@ class Discriminator(nn.Module):
   dtype: Any = jnp.float32
 
   @nn.compact
-  def __call__(self, x: jnp.ndarray, train: bool = True):
+  def __call__(self, x: jnp.ndarray, batch_size = parameters.batch_size, train: bool = True):
 
     conv = partial(nn.Conv, kernel_size=[4, 4], strides=[2, 2], padding='VALID',
                    kernel_init=normal_init(0.02), dtype=self.dtype)
@@ -68,7 +72,8 @@ class Discriminator(nn.Module):
     x = batch_norm()(x)
     x = nn.leaky_relu(x, 0.2)
     x = conv(1)(x)
-    x = x.reshape((parameters.batch_size, -1))
+    x = x.reshape((batch_size, -1))
+    # print('Discriminator Compiled')
     return x
 
 def create_state(rng, model_cls, input_shape): 
@@ -112,12 +117,10 @@ def generator_step(generator_state, discriminator_state, key):
         {'params': params, 'batch_stats': generator_state.batch_stats},
         input_noise, mutable=['batch_stats']) 
     
-    print(generated_data.shape)
-    
-    logits = discriminator_state.apply_fn(
+    logits,_  = discriminator_state.apply_fn(
         {'params': discriminator_state.params, 
          'batch_stats': discriminator_state.batch_stats},
-         generated_data)
+         generated_data, mutable=['batch_stats'])
     
     loss = -jnp.mean(jnp.log(nn.sigmoid(logits)))
     return loss, mutables
@@ -137,28 +140,29 @@ def discriminator_step(generator_state, discriminator_state, real_data, key):
   r"""The discriminator is updated by critiquing both real and generated data,
   It's loss goes down as it predicts correctly if images are real or generated.
   """
-  input_noise = jax.random.normal(key, (parameters.batch_size, parameters.noise_dims))
+  input_noise = jax.random.normal(key, (len(real_data), parameters.noise_dims))
 
-  generated_data = generator_state.apply_fn(
+  generated_data, _ = generator_state.apply_fn(
         {'params': generator_state.params, 
          'batch_stats': generator_state.batch_stats},
-         input_noise)
+         input_noise, len(real_data), mutable=['batch_stats'])
   
   def loss_fn(params):
 
     logits_real, mutables = discriminator_state.apply_fn(
         {'params': params, 'batch_stats': discriminator_state.batch_stats},
-        real_data, mutable=['batch_stats'])
+        real_data, len(real_data), mutable=['batch_stats'])
         
     logits_generated, mutables = discriminator_state.apply_fn(
         {'params': params, 'batch_stats': mutables['batch_stats']},
-        generated_data, mutable=['batch_stats'])
+        generated_data, len(real_data), mutable=['batch_stats'])
     
 
-    real_loss = optax.sigmoid_binary_cross_entropy(logits_real, parameters.true_labels_template).mean()
-    generated_loss = optax.sigmoid_binary_cross_entropy(logits_generated, parameters.false_labels_template).mean()
+    real_loss = optax.sigmoid_binary_cross_entropy(logits_real, parameters.true_labels_template[:len(real_data)]).mean()
+    generated_loss = optax.sigmoid_binary_cross_entropy(logits_generated, parameters.false_labels_template[:len(real_data)]).mean()
     
     loss = (real_loss + generated_loss) / 2
+    # print('Discriminator Steper Compiled!!')
 
     return loss, mutables
 
@@ -171,7 +175,7 @@ def discriminator_step(generator_state, discriminator_state, real_data, key):
   return new_discriminator_state, loss
 
 
-
+Path('results').mkdir(parents=True, exist_ok=True)
 
 trainloader, devloader = load_dataset()
 
@@ -184,17 +188,23 @@ generator_state = create_state(key_generator, Generator, (parameters.batch_size,
 generator_input = jax.random.normal(key, (parameters.batch_size, parameters.noise_dims))  # random noise
 
 
-loss = {'generator': [], 'discriminator': []}
+loss_epoch = {'generator': [], 'discriminator': []}
 
 
 for epoch in range(parameters.epoches):
 
-    itr = tqdm(enumerate(trainloader))
-    itr.set_description(f'Epoch: {epoch} ')
-
+    # itr = tqdm(enumerate(trainloader))
+    itr = enumerate(devloader)
+    # itr.set_description(f'Epoch: {epoch} ')
+    loss_gen = []
+    los_disc = []
+    print('started epoch')
     for batch, batch_data in itr:
 
-      print(batch_data['data'].shape, 'hi!')
+      if len(batch_data['data']) < parameters.batch_size:
+        # print('batch skiped')
+        continue
+
       # Generate RNG keys for generator and discriminator.
       key, key_generator, key_discriminator = jax.random.split(key, 3)
 
@@ -206,25 +216,23 @@ for epoch in range(parameters.epoches):
       discriminator_state, discriminator_loss = discriminator_step(
           generator_state, discriminator_state, batch_data['data'], key_discriminator)
       
+      loss_gen += [generator_loss.item()]
+      los_disc += [discriminator_loss.item()]
     
-    metrics = jax.device_get([generator_loss[0], discriminator_loss[1]])
+    loss_gen = np.mean(loss_gen)
+    los_disc = np.mean(los_disc)
+    print(f"Geneator loss: {loss_gen:.3f} Discriminator Loss: {los_disc:.3f}")
+    loss_epoch['generator'] += [loss_gen]
+    loss_epoch['discriminator'] += [los_disc]
 
-    message = f"Epoch: {epoch: <2} | "
-    message += f"Generator loss: {metrics[0]:.3f} | "
-    message += f"Discriminator loss: {metrics[1]:.3f}"
+    if not (epoch % 10):
+      sample = sample_from_generator(generator_state, generator_input)
+      sample = sample.reshape((-1, 28, 28))
+      fig, axes = plt.subplots(nrows=7, ncols=7, figsize=(7, 7))
+      for ax, image in zip(sum(axes.tolist(), []), sample):
+        ax.imshow(image, cmap='gray')
+        ax.set_axis_off()
+      
+      fig.savefig(f"results/GAN_epoch_{epoch}.png")
 
-  # Sample from the generator using the fixed input. We need to
-  # reshape if we are working on multiple devices.
-  # sample = sample_from_generator(generator_state, generator_input)
-  # sample = sample.reshape((-1, 28, 28))
-
-  # # Next, plot the static samples, save the fig to disk.
-  # if epoch % 10 == 0:
-  #   fig, axes = plt.subplots(nrows=7, ncols=7, figsize=(7, 7))
-  #   for ax, image in zip(sum(axes.tolist(), []), sample):
-  #     ax.imshow(image, cmap='gray')
-  #     ax.set_axis_off()
-  #   plt.show()
-  #   fig.savefig(f"results/1_GAN/GAN_epoch_{epoch}.png")
-  #   plt.close(fig)
 # %%

@@ -29,7 +29,7 @@ def load_dataset():
                                             shuffle=True)
 
   dev_loader = DataLoader(datasets.MNIST(root='./data', train=False, download=True, transform=transform),
-                                          batch_size=parameters.batch_size>>1,
+                                          batch_size=parameters.batch_size,
                                           collate_fn=custom_collate_fn,
                                           shuffle=False)
   
@@ -40,3 +40,12 @@ def custom_collate_fn(batch):
   return {'data': jnp.stack(([jnp.array(example[0]) for example in batch]))}
   
 
+def plot_training(history):
+    
+    plt.plot(history['generator'])
+    plt.plot(history['discriminator'])
+    plt.legend(['generator', 'discriminator'], loc='upper left')
+    plt.ylabel('Loss')
+    plt.xlabel('Epoch')
+
+    plt.savefig(f'results/train_history.png')
