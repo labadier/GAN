@@ -6,7 +6,6 @@ from matplotlib import pyplot as plt
 from torchvision import transforms, datasets
 from params import parameters 
 from jax import numpy as jnp
-import torch
 
 def imshow(img):
 

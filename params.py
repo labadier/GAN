@@ -7,7 +7,7 @@ class parameters:
   batch_size = 32
   learning_rate = 2e-4
   noise_dims = 64
-  epoches = 2#100
+  epoches = 100
 
   true_labels_template = jnp.ones((batch_size, 1), dtype=jnp.int32)
   false_labels_template= jnp.zeros((batch_size, 1), dtype=jnp.int32)
