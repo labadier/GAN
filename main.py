@@ -59,7 +59,7 @@ for epoch in range(parameters.epoches):
   
   loss_gen = np.mean(loss_gen)
   los_disc = np.mean(los_disc)
-  print(f"Epoch {epoch} Time: {time.time() - time.time():.2f}s : Geneator loss: {loss_gen:.3f} Discriminator Loss: {los_disc:.3f}")
+  print(f"Epoch {epoch} Time: {time.time() - timestart:.2f}s : Geneator loss: {loss_gen:.3f} Discriminator Loss: {los_disc:.3f}")
   loss_epoch['generator'] += [loss_gen]
   loss_epoch['discriminator'] += [los_disc]
 
