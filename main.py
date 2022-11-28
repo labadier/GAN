@@ -30,7 +30,7 @@ loss_epoch = {'generator': [], 'discriminator': []}
 for epoch in range(parameters.epoches):
 
   # itr = tqdm(enumerate(trainloader))
-  itr = enumerate(devloader)
+  itr = enumerate(trainloader)
   # itr.set_description(f'Epoch: {epoch} ')
   loss_gen = []
   los_disc = []
