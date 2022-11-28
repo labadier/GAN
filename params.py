@@ -4,7 +4,7 @@ class parameters:
 
   seed = 24
   
-  batch_size = 64
+  batch_size = 128
   learning_rate = 2e-4
   noise_dims = 64
   epoches = 100

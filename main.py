@@ -3,6 +3,7 @@ from tqdm import tqdm
 import numpy as np
 from matplotlib import pyplot as plt
 from pathlib import Path
+import time
 
 from utils import load_dataset, plot_training
 from models import Discriminator, Generator, generator_step, discriminator_step
@@ -18,7 +19,7 @@ trainloader, devloader = load_dataset()
 key = jax.random.PRNGKey(seed=parameters.seed)
 key_generator, key_discriminator, key = jax.random.split(key, 3)
 
-discriminator_state = create_state(key_discriminator, Discriminator, next(iter(trainloader))['data'].shape)
+discriminator_state = create_state(key_discriminator, Discriminator, next(iter(trainloader))[0].numpy().shape)
 generator_state = create_state(key_generator, Generator, (parameters.batch_size, parameters.noise_dims))
 
 generator_input = jax.random.normal(key, (parameters.batch_size, parameters.noise_dims))  # random noise
@@ -35,10 +36,11 @@ for epoch in range(parameters.epoches):
   loss_gen = []
   los_disc = []
   print('started epoch')
+  timestart = time.time()  
   for batch, batch_data in itr:
 
-    if len(batch_data['data']) < parameters.batch_size:
-      # print('batch skiped')
+    if len(batch_data[0].numpy()) < parameters.batch_size:
+      print('batch skiped')
       continue
 
     # Generate RNG keys for generator and discriminator.
@@ -50,14 +52,14 @@ for epoch in range(parameters.epoches):
 
     # Take a step with the discriminator.
     discriminator_state, discriminator_loss = discriminator_step(
-        generator_state, discriminator_state, batch_data['data'], key_discriminator)
+        generator_state, discriminator_state, batch_data[0].numpy(), key_discriminator)
     
     loss_gen += [generator_loss.item()]
     los_disc += [discriminator_loss.item()]
   
   loss_gen = np.mean(loss_gen)
   los_disc = np.mean(los_disc)
-  print(f"Epoch {epoch}: Geneator loss: {loss_gen:.3f} Discriminator Loss: {los_disc:.3f}")
+  print(f"Epoch {epoch} Time: {time.time() - time.time():.2f}s : Geneator loss: {loss_gen:.3f} Discriminator Loss: {los_disc:.3f}")
   loss_epoch['generator'] += [loss_gen]
   loss_epoch['discriminator'] += [los_disc]
 
@@ -70,6 +72,7 @@ for epoch in range(parameters.epoches):
       ax.set_axis_off()
     
     fig.savefig(f"results/GAN_epoch_{epoch}.png")
+    plt.clf()
   
 plot_training(loss_epoch)
 
